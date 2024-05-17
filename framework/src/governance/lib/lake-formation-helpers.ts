@@ -58,7 +58,7 @@ export function registerS3Location(
   scope: Construct,
   id: string,
   locationBucket: IBucket,
-  locationPrefix?: string,
+  locationPrefix: string,
   accessMode?: PermissionModel,
 ) : [IRole, CfnResource] {
 
@@ -67,15 +67,16 @@ export function registerS3Location(
     assumedBy: new ServicePrincipal('lakeformation.amazonaws.com'),
   });
 
-  locationBucket.grantReadWrite(lfDataAccessRole, locationPrefix);
-  locationBucket.encryptionKey?.grantEncryptDecrypt(lfDataAccessRole);
+  const grantRead = locationBucket.grantReadWrite(lfDataAccessRole, locationPrefix);
 
   const dataLakeLocation = new CfnResource(scope, `${id}DataLakeLocation`, {
     hybridAccessEnabled: accessMode === PermissionModel.HYBRID ? true : false,
     useServiceLinkedRole: false,
     roleArn: lfDataAccessRole.roleArn,
-    resourceArn: locationBucket?.arnForObjects(locationPrefix || ''),
+    resourceArn: locationBucket.arnForObjects(locationPrefix),
   });
+
+  dataLakeLocation.node.addDependency(grantRead);
 
   return [lfDataAccessRole, dataLakeLocation];
 

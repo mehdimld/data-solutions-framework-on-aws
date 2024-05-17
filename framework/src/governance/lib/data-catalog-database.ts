@@ -86,6 +86,10 @@ export class DataCatalogDatabase extends TrackedConstruct {
    * The location prefix without trailing slash
    */
   private cleanedLocationPrefix?: string;
+  /**
+   * The location S3 URI
+   */
+  private s3LocationUri?: string;
 
   constructor(scope: Construct, id: string, props: DataCatalogDatabaseProps) {
     const trackedConstructProps: TrackedConstructProps = {
@@ -106,14 +110,10 @@ export class DataCatalogDatabase extends TrackedConstruct {
     const hash = Utils.generateUniqueHash(this);
     this.databaseName = props.name + '_' + hash.toLowerCase();
 
-    let s3LocationUri: string|undefined;
-
     if (catalogType === CatalogType.S3) {
 
-      if (props.locationPrefix!.endsWith('/')) {
-        locationPrefix = '/';
-      }
-      s3LocationUri = props.locationBucket!.s3UrlForObject(this.locationPrefix);
+      this.cleanedLocationPrefix = props.locationPrefix === undefined ? '' : props.locationPrefix.replace(/\/$/g, '');
+      this.s3LocationUri = props.locationBucket!.s3UrlForObject(this.cleanedLocationPrefix);
 
       if (props.permissionModel === PermissionModel.LAKE_FORMATION || props.permissionModel === PermissionModel.HYBRID) {
 
@@ -125,7 +125,7 @@ export class DataCatalogDatabase extends TrackedConstruct {
           [this.lfDataAccessRole, this.dataLakeLocation] = registerS3Location(
             this, 'LakeFormationRegistration',
             props.locationBucket,
-            this.locationPrefix,
+            this.cleanedLocationPrefix,
             props.permissionModel,
           );
           this.lfDataAccessRole.node.addDependency(this.dataLakeSettings);
@@ -145,18 +145,19 @@ export class DataCatalogDatabase extends TrackedConstruct {
       catalogId: Stack.of(this).account,
       databaseInput: {
         name: this.databaseName,
-        locationUri: s3LocationUri,
+        locationUri: this.s3LocationUri,
       },
     });
 
-    if (props.permissionModel === PermissionModel.LAKE_FORMATION || props.permissionModel === PermissionModel.HYBRID) {
-      this.database.node.addDependency(this.dataLakeLocation!);
+    if (catalogType === CatalogType.S3 && (props.permissionModel === PermissionModel.LAKE_FORMATION || props.permissionModel === PermissionModel.HYBRID)) {
+      
+      // this.database.node.addDependency(this.dataLakeLocation!);
       this.database.node.addDependency(this.cdkLfLocationGrant!);
-    }
 
-    if (catalogType === CatalogType.S3 && props.permissionModel === PermissionModel.LAKE_FORMATION) {
-      this.removeIamAllowedPrincipal = removeIamAllowedPrincipal(this, 'IamRevoke', this.databaseName);
-      this.removeIamAllowedPrincipal.node.addDependency(this.database);
+      if (props.permissionModel === PermissionModel.LAKE_FORMATION) {
+        this.removeIamAllowedPrincipal = removeIamAllowedPrincipal(this, 'IamRevoke', this.databaseName);
+        this.removeIamAllowedPrincipal.node.addDependency(this.database);
+      }
     }
 
     let autoCrawl = props.autoCrawl;
