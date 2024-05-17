@@ -9,7 +9,7 @@ import { CfnDataLakeSettings, CfnPermissions, CfnPrincipalPermissions, CfnResour
 import { AwsCustomResource } from 'aws-cdk-lib/custom-resources';
 import { Construct } from 'constructs';
 import { DataCatalogDatabaseProps } from './data-catalog-database-props';
-import { grantDataLakeLocation, grantLfAdminRole, registerS3Location, removeIamAllowedPrincipal } from './lake-formation-helpers';
+import { /*grantDataLakeLocation,*/ grantLfAdminRole, registerS3Location, removeIamAllowedPrincipal } from './lake-formation-helpers';
 import { Context, PermissionModel, TrackedConstruct, TrackedConstructProps, Utils } from '../../utils';
 
 /**
@@ -130,13 +130,13 @@ export class DataCatalogDatabase extends TrackedConstruct {
           );
           this.lfDataAccessRole.node.addDependency(this.dataLakeSettings);
 
-          this.cdkLfLocationGrant = grantDataLakeLocation(
-            this, 
-            'CdkLfLocationGrant', 
-            this.dataLakeLocation!.resourceArn,
-            cdkRole,
-          );
-          this.cdkLfLocationGrant.node.addDependency(this.dataLakeLocation!);
+          // this.cdkLfLocationGrant = grantDataLakeLocation(
+          //   this, 
+          //   'CdkLfLocationGrant', 
+          //   this.dataLakeLocation!.resourceArn,
+          //   cdkRole,
+          // );
+          // this.cdkLfLocationGrant.node.addDependency(this.dataLakeLocation!);
         }
       }
     }
@@ -152,7 +152,7 @@ export class DataCatalogDatabase extends TrackedConstruct {
     if (catalogType === CatalogType.S3 && (props.permissionModel === PermissionModel.LAKE_FORMATION || props.permissionModel === PermissionModel.HYBRID)) {
       
       // this.database.node.addDependency(this.dataLakeLocation!);
-      this.database.node.addDependency(this.cdkLfLocationGrant!);
+      // this.database.node.addDependency(this.cdkLfLocationGrant!);
 
       if (props.permissionModel === PermissionModel.LAKE_FORMATION) {
         this.removeIamAllowedPrincipal = removeIamAllowedPrincipal(this, 'IamRevoke', this.databaseName);

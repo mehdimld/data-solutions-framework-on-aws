@@ -1,7 +1,7 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { Stack } from 'aws-cdk-lib';
+import { Duration, Stack } from 'aws-cdk-lib';
 import { IRole, ISamlProvider, IUser, Role, ServicePrincipal } from 'aws-cdk-lib/aws-iam';
 import { CfnDataLakeSettings, CfnPermissions, CfnResource } from 'aws-cdk-lib/aws-lakeformation';
 import { RetentionDays } from 'aws-cdk-lib/aws-logs';
@@ -99,9 +99,15 @@ export function removeIamAllowedPrincipal(scope: Construct, id: string, database
       service: 'LakeFormation',
       action: 'RevokePermissions',
       parameters: {
-        Permissions: 'ALL',
-        Principal: 'IAMAllowedPrincipals',
-        Resource: database,
+        Permissions: ['ALL'],
+        Principal: {
+          DataLakePrincipalIdentifier: 'IAM_ALLOWED_PRINCIPALS',
+        },
+        Resource: {
+          Database: {
+            Name: database,
+          }
+        }
       },
       physicalResourceId: PhysicalResourceId.of(`${database}`),
     },
@@ -110,6 +116,7 @@ export function removeIamAllowedPrincipal(scope: Construct, id: string, database
       resources: [`arn:${stack.partition}:glue:${stack.region}:${stack.account}:database/${database}`],
     }),
     logRetention: RetentionDays.ONE_WEEK,
+    timeout: Duration.seconds(60)
   });
 }
 
