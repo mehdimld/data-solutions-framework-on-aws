@@ -4,9 +4,10 @@
 
 import { createHmac } from 'crypto';
 import * as fs from 'fs';
-import { Stack } from 'aws-cdk-lib';
+import { DefaultStackSynthesizer, Fn, Stack } from 'aws-cdk-lib';
 import { Construct } from 'constructs';
 import * as yaml from 'js-yaml';
+import { IRole, Role } from 'aws-cdk-lib/aws-iam';
 
 /**
  * Utilities class used across the different resources
@@ -98,5 +99,14 @@ export class Utils {
     const components = node.scopes.slice(1).map(c => c.node.id).join('-').concat(id || '', stackName);
 
     return this.generateHash(components);
+  }
+
+  /**
+   * Get CDK deployment role
+   */
+  public static getCdkDeploymentRole(scope: Construct): IRole {
+    const stack = Stack.of(scope);
+    const synthesizer = stack.synthesizer as DefaultStackSynthesizer;
+    return Role.fromRoleArn(scope, 'CdkRole', Fn.sub(synthesizer.deployRoleArn));
   }
 }

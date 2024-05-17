@@ -3204,12 +3204,14 @@ Any object.
 | <code><a href="#@cdklabs/aws-data-solutions-framework.governance.DataCatalogDatabase.property.database">database</a></code> | <code>aws-cdk-lib.aws_glue.CfnDatabase</code> | The Glue Database that's created. |
 | <code><a href="#@cdklabs/aws-data-solutions-framework.governance.DataCatalogDatabase.property.databaseName">databaseName</a></code> | <code>string</code> | The Glue Database name with the randomized suffix to prevent name collisions in the catalog. |
 | <code><a href="#@cdklabs/aws-data-solutions-framework.governance.DataCatalogDatabase.property.crawler">crawler</a></code> | <code>aws-cdk-lib.aws_glue.CfnCrawler</code> | The Glue Crawler created when `autoCrawl` is set to `true` (default value). |
+| <code><a href="#@cdklabs/aws-data-solutions-framework.governance.DataCatalogDatabase.property.crawlerLfGrant">crawlerLfGrant</a></code> | <code>aws-cdk-lib.aws_lakeformation.CfnPrincipalPermissions</code> | The Lake Formation grant on the Crawler when Lake Formation permissions are used. |
 | <code><a href="#@cdklabs/aws-data-solutions-framework.governance.DataCatalogDatabase.property.crawlerLogEncryptionKey">crawlerLogEncryptionKey</a></code> | <code>aws-cdk-lib.aws_kms.IKey</code> | KMS encryption Key used by the Crawler. |
 | <code><a href="#@cdklabs/aws-data-solutions-framework.governance.DataCatalogDatabase.property.crawlerRole">crawlerRole</a></code> | <code>aws-cdk-lib.aws_iam.IRole</code> | The IAM Role used by the Glue crawler when created. |
 | <code><a href="#@cdklabs/aws-data-solutions-framework.governance.DataCatalogDatabase.property.crawlerSecurityConfiguration">crawlerSecurityConfiguration</a></code> | <code>aws-cdk-lib.aws_glue.CfnSecurityConfiguration</code> | The Glue security configuration used by the Glue Crawler when created. |
 | <code><a href="#@cdklabs/aws-data-solutions-framework.governance.DataCatalogDatabase.property.dataLakeLocation">dataLakeLocation</a></code> | <code>aws-cdk-lib.aws_lakeformation.CfnResource</code> | The Lake Formation data lake location. |
 | <code><a href="#@cdklabs/aws-data-solutions-framework.governance.DataCatalogDatabase.property.dataLakeSettings">dataLakeSettings</a></code> | <code>aws-cdk-lib.aws_lakeformation.CfnDataLakeSettings</code> | The DataLakeSettings for Lake Formation. |
 | <code><a href="#@cdklabs/aws-data-solutions-framework.governance.DataCatalogDatabase.property.lfDataAccessRole">lfDataAccessRole</a></code> | <code>aws-cdk-lib.aws_iam.IRole</code> | The IAM Role used by Lake Formation to access data. |
+| <code><a href="#@cdklabs/aws-data-solutions-framework.governance.DataCatalogDatabase.property.removeIamAllowedPrincipal">removeIamAllowedPrincipal</a></code> | <code>aws-cdk-lib.custom_resources.AwsCustomResource</code> | The custom resource for revoking IAM permissions from the database. |
 
 ---
 
@@ -3260,6 +3262,18 @@ public readonly crawler: CfnCrawler;
 The Glue Crawler created when `autoCrawl` is set to `true` (default value).
 
 This property can be undefined if `autoCrawl` is set to `false`.
+
+---
+
+##### `crawlerLfGrant`<sup>Optional</sup> <a name="crawlerLfGrant" id="@cdklabs/aws-data-solutions-framework.governance.DataCatalogDatabase.property.crawlerLfGrant"></a>
+
+```typescript
+public readonly crawlerLfGrant: CfnPrincipalPermissions;
+```
+
+- *Type:* aws-cdk-lib.aws_lakeformation.CfnPrincipalPermissions
+
+The Lake Formation grant on the Crawler when Lake Formation permissions are used.
 
 ---
 
@@ -3332,6 +3346,18 @@ public readonly lfDataAccessRole: IRole;
 - *Type:* aws-cdk-lib.aws_iam.IRole
 
 The IAM Role used by Lake Formation to access data.
+
+---
+
+##### `removeIamAllowedPrincipal`<sup>Optional</sup> <a name="removeIamAllowedPrincipal" id="@cdklabs/aws-data-solutions-framework.governance.DataCatalogDatabase.property.removeIamAllowedPrincipal"></a>
+
+```typescript
+public readonly removeIamAllowedPrincipal: AwsCustomResource;
+```
+
+- *Type:* aws-cdk-lib.custom_resources.AwsCustomResource
+
+The custom resource for revoking IAM permissions from the database.
 
 ---
 

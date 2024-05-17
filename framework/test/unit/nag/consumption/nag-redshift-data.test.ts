@@ -87,6 +87,8 @@ NagSuppressions.addResourceSuppressionsByPath(stack, [
   { id: 'AwsSolutions-L1', reason: 'Resource is not part of the test scope' },
   { id: 'AwsSolutions-S10', reason: 'Resource is not part of the test scope' },
   { id: 'AwsSolutions-S1', reason: 'Resource is not part of the test scope' },
+  { id: 'AwsSolutions-SF1', reason: 'Resource is not part of the test scope' },
+  { id: 'AwsSolutions-SF2', reason: 'Resource is not part of the test scope' },
 ],
 true);
 

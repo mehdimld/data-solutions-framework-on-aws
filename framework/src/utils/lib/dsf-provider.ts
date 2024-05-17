@@ -186,6 +186,7 @@ export class DsfProvider extends Construct {
       securityGroups: this.securityGroups,
       totalTimeout: props.queryTimeout,
       logRetention: DsfProvider.LOG_RETENTION,
+      disableWaiterStateMachineLogging: this.isCompleteHandlerFunction ? true : undefined,
     });
 
     // Scope down the `onEventHandlerFunction` to be called

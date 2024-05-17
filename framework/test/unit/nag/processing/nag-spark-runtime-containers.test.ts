@@ -144,9 +144,11 @@ NagSuppressions.addResourceSuppressionsByPath(emrEksClusterStack, 'nagStack/@aws
   { id: 'AwsSolutions-IAM5', reason: 'wild card used by L2 resource' },
 ]);
 
-NagSuppressions.addResourceSuppressionsByPath(emrEksClusterStack, 'nagStack/@aws-cdk--aws-eks.ClusterResourceProvider/Provider/waiter-state-machine/Role/DefaultPolicy/Resource', [
+NagSuppressions.addResourceSuppressionsByPath(emrEksClusterStack, 'nagStack/@aws-cdk--aws-eks.ClusterResourceProvider/Provider/waiter-state-machine', [
   { id: 'AwsSolutions-IAM5', reason: 'unable to modify the role of the step function' },
-]);
+  { id: 'AwsSolutions-SF1', reason: 'No need to log the custom resource provider framework itself' },
+  { id: 'AwsSolutions-SF2', reason: 'No need to enable x-ray the custom resource provider framework itself' },
+], true);
 
 NagSuppressions.addResourceSuppressionsByPath(emrEksClusterStack, '/nagStack/@aws-cdk--aws-eks.KubectlProvider/Handler/Resource', [
   { id: 'AwsSolutions-L1', reason: 'unable to modify the runtime' },
@@ -262,6 +264,8 @@ NagSuppressions.addResourceSuppressionsByPath(
   'nagStack/InteractiveSessionProvider/CustomResourceProvider/waiter-state-machine',
   [
     { id: 'AwsSolutions-IAM5', reason: 'Custom Resource provider from the CDK framework' },
+    { id: 'AwsSolutions-SF1', reason: 'We don\'t need logging for custom resource provider framework itself' },
+    { id: 'AwsSolutions-SF2', reason: 'We don\'t need x-ray for custom resource provider framework itself' },
   ],
   true,
 );

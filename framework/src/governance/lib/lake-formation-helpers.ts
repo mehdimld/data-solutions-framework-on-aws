@@ -1,27 +1,14 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { DefaultStackSynthesizer, Fn, Stack } from 'aws-cdk-lib';
-import { IRole, ISamlProvider, IUser, Role } from 'aws-cdk-lib/aws-iam';
-import { CfnDataLakeSettings } from 'aws-cdk-lib/aws-lakeformation';
+import { Stack } from 'aws-cdk-lib';
+import { IRole, ISamlProvider, IUser, Role, ServicePrincipal } from 'aws-cdk-lib/aws-iam';
+import { CfnDataLakeSettings, CfnPermissions, CfnResource } from 'aws-cdk-lib/aws-lakeformation';
+import { RetentionDays } from 'aws-cdk-lib/aws-logs';
+import { IBucket } from 'aws-cdk-lib/aws-s3';
+import { AwsCustomResource, AwsCustomResourcePolicy, PhysicalResourceId } from 'aws-cdk-lib/custom-resources';
 import { Construct } from 'constructs';
-
-
-/**
-* Adds the CDK execution role to LF admins
-* @param scope the construct scope
-* @param id the construct id
-* @return the CfnDataLakeSettings to set the CDK role as Lake Formation admin
-*/
-export function makeCdkLfAdmin(scope: Construct, id: string): CfnDataLakeSettings {
-
-  // get the CDK execution role
-  const stack = Stack.of(scope);
-  const synthesizer = stack.synthesizer as DefaultStackSynthesizer;
-
-  // make the CDK execution role a Lake Formation admin
-  return grantLfAdminRole(scope, id, Role.fromRoleArn(scope, 'CdkRole', Fn.sub(synthesizer.deployRoleArn)));
-}
+import { PermissionModel } from '../../utils';
 
 
 /**
@@ -44,7 +31,6 @@ export function grantLfAdminRole(scope: Construct, id: string, principal: IRole|
     principalArn = samlIdentity[0].samlProviderArn + samlIdentity[1];
   }
 
-
   return new CfnDataLakeSettings(scope, id, {
     admins: [
       {
@@ -52,5 +38,102 @@ export function grantLfAdminRole(scope: Construct, id: string, principal: IRole|
       },
     ],
     mutationType: 'APPEND',
+    parameters: {
+      CROSS_ACCOUNT_VERSION: 4,
+    },
+  });
+}
+
+/**
+ * Register an Amazon S3 location in AWS Lake Formation.
+ * It creates an IAM Role dedicated per location and register the location using either Lake Formation or Hybrid access model.
+ * @param scope the construct scope
+ * @param id the construct id
+ * @param locationBucket the Amazon S3 location bucket
+ * @param locationPrefix the Amazon S3 location prefix
+ * @param accessMode the Amazon S3 location access model
+ * @return the CfnDataLakeSettings to register the Amazon S3 location in AWS Lake Formation
+ */
+export function registerS3Location(
+  scope: Construct,
+  id: string,
+  locationBucket: IBucket,
+  locationPrefix?: string,
+  accessMode?: PermissionModel,
+) : [IRole, CfnResource] {
+
+  // create the IAM role for LF data access
+  const lfDataAccessRole = new Role(scope, `${id}DataAccessRole`, {
+    assumedBy: new ServicePrincipal('lakeformation.amazonaws.com'),
+  });
+
+  locationBucket.grantReadWrite(lfDataAccessRole, locationPrefix);
+  locationBucket.encryptionKey?.grantEncryptDecrypt(lfDataAccessRole);
+
+  const dataLakeLocation = new CfnResource(scope, `${id}DataLakeLocation`, {
+    hybridAccessEnabled: accessMode === PermissionModel.HYBRID ? true : false,
+    useServiceLinkedRole: false,
+    roleArn: lfDataAccessRole.roleArn,
+    resourceArn: locationBucket?.arnForObjects(locationPrefix || ''),
+  });
+
+  return [lfDataAccessRole, dataLakeLocation];
+
+}
+
+/**
+ * Remove the IAMAllowedPrincipal permission from the database.
+ * @param scope the construct scope
+ * @param id the construct id
+ * @param database the database to remove the IAMAllowedPrincipal permission
+ * @return the CfnDataLakeSettings to remove the IAMAllowedPrincipal permission
+ */
+export function removeIamAllowedPrincipal(scope: Construct, id: string, database: string): AwsCustomResource {
+
+  const stack = Stack.of(scope);
+
+  // eslint-disable-next-line local-rules/no-tokens-in-construct-id
+  return new AwsCustomResource(scope, id, {
+    onCreate: {
+      service: 'LakeFormation',
+      action: 'RevokePermissions',
+      parameters: {
+        Permissions: 'ALL',
+        Principal: 'IAMAllowedPrincipals',
+        Resource: database,
+      },
+      physicalResourceId: PhysicalResourceId.of(`${database}`),
+    },
+    //Will ignore any resource and use the assumedRoleArn as resource and 'sts:AssumeRole' for service:action
+    policy: AwsCustomResourcePolicy.fromSdkCalls({
+      resources: [`arn:${stack.partition}:glue:${stack.region}:${stack.account}:database/${database}`],
+    }),
+    logRetention: RetentionDays.ONE_WEEK,
+  });
+}
+
+/**
+ * Grant Lake Formation access on Data Lake Location
+ * @param scope the construct scope
+ * @param id the construct id
+ * @param location the Amazon S3 location in ARN format
+ * @param principal the IAM Principal to grant Lake Formation access on Data Lake Location
+ * @return the CfnPermissions to grant Lake Formation access on Data Lake Location
+ */
+
+export function grantDataLakeLocation(scope: Construct, id: string, location: string, principal: IRole): CfnPermissions {
+
+  return new CfnPermissions(scope, id, {
+    permissions: ['DATA_LOCATION_ACCESS'],
+    permissionsWithGrantOption: [],
+    dataLakePrincipal: {
+      dataLakePrincipalIdentifier: principal.roleArn,
+    },
+    resource: {
+      dataLocationResource: {
+        catalogId: Stack.of(scope).account,
+        s3Resource: location,
+      },
+    },
   });
 }

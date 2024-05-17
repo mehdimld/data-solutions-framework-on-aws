@@ -5,12 +5,12 @@ import { Stack } from 'aws-cdk-lib';
 import { CfnCrawler, CfnDatabase, CfnSecurityConfiguration } from 'aws-cdk-lib/aws-glue';
 import { AddToPrincipalPolicyResult, Effect, IPrincipal, IRole, PolicyDocument, PolicyStatement, Role, ServicePrincipal } from 'aws-cdk-lib/aws-iam';
 import { IKey, Key } from 'aws-cdk-lib/aws-kms';
-import { CfnDataLakeSettings, CfnResource } from 'aws-cdk-lib/aws-lakeformation';
+import { CfnDataLakeSettings, CfnPermissions, CfnPrincipalPermissions, CfnResource } from 'aws-cdk-lib/aws-lakeformation';
+import { AwsCustomResource } from 'aws-cdk-lib/custom-resources';
 import { Construct } from 'constructs';
 import { DataCatalogDatabaseProps } from './data-catalog-database-props';
-import { makeCdkLfAdmin } from './lake-formation-helpers';
+import { grantDataLakeLocation, grantLfAdminRole, registerS3Location, removeIamAllowedPrincipal } from './lake-formation-helpers';
 import { Context, PermissionModel, TrackedConstruct, TrackedConstructProps, Utils } from '../../utils';
-import { AwsCustomResource, AwsCustomResourcePolicy, PhysicalResourceId } from 'aws-cdk-lib/custom-resources';
 
 /**
  * An AWS Glue Data Catalog Database configured with the location and a crawler.
@@ -67,9 +67,25 @@ export class DataCatalogDatabase extends TrackedConstruct {
    */
   readonly removeIamAllowedPrincipal?: AwsCustomResource;
   /**
+   * The Lake Formation grant on the database for the Crawler when Lake Formation or Hybrid is used
+   */
+  readonly crawlerLfDbGrant?: CfnPrincipalPermissions;
+  /**
+   * The Lake Formation grant on the data location for the Crawler when Lake Formation or Hybrid is used
+   */
+  readonly crawlerLfLocationGrant?: CfnPermissions;
+  /**
+   * The Lake Frormation grant on the Data Lake location for the CDK deploy role
+   */
+  readonly cdkLfLocationGrant?: CfnPermissions;
+  /**
    * Caching constructor properties for internal reuse by constructor methods
    */
   private dataCatalogDatabaseProps: DataCatalogDatabaseProps;
+  /**
+   * The location prefix without trailing slash
+   */
+  private cleanedLocationPrefix?: string;
 
   constructor(scope: Construct, id: string, props: DataCatalogDatabaseProps) {
     const trackedConstructProps: TrackedConstructProps = {
@@ -82,6 +98,7 @@ export class DataCatalogDatabase extends TrackedConstruct {
     if (catalogType === CatalogType.INVALID) {
       throw new Error("Data catalog type can't be determined. Please check `DataCatalogDatabase` properties.");
     }
+    const cdkRole = Utils.getCdkDeploymentRole(this);
 
     this.dataCatalogDatabaseProps = props;
     const removalPolicy = Context.revertRemovalPolicy(this, props.removalPolicy);
@@ -89,55 +106,37 @@ export class DataCatalogDatabase extends TrackedConstruct {
     const hash = Utils.generateUniqueHash(this);
     this.databaseName = props.name + '_' + hash.toLowerCase();
 
-    let s3LocationUri: string|undefined, locationPrefix: string|undefined;
+    let s3LocationUri: string|undefined;
 
     if (catalogType === CatalogType.S3) {
-      locationPrefix = props.locationPrefix;
 
-      if (!locationPrefix!.endsWith('/')) {
-        locationPrefix += '/';
+      if (props.locationPrefix!.endsWith('/')) {
+        locationPrefix = '/';
       }
+      s3LocationUri = props.locationBucket!.s3UrlForObject(this.locationPrefix);
 
-      s3LocationUri = props.locationBucket!.s3UrlForObject(locationPrefix);
+      if (props.permissionModel === PermissionModel.LAKE_FORMATION || props.permissionModel === PermissionModel.HYBRID) {
 
-      if (props.permissionModel === PermissionModel.LAKE_FORMATION) {
-        this.dataLakeSettings = makeCdkLfAdmin(this, 'CdkAdmin');
+        this.dataLakeSettings = grantLfAdminRole(this, 'CdkLfAdmin', cdkRole );
 
         // register location
         if (props.locationBucket) {
-          // create the IAM role for LF data access
-          this.lfDataAccessRole = new Role(this, 'LfDataAccessRole', {
-            assumedBy: new ServicePrincipal('lakeformation.amazonaws.com'),
-          });
 
-          props.locationBucket.grantReadWrite(this.lfDataAccessRole, locationPrefix);
-          props.locationBucket.encryptionKey?.grantEncryptDecrypt(this.lfDataAccessRole);
+          [this.lfDataAccessRole, this.dataLakeLocation] = registerS3Location(
+            this, 'LakeFormationRegistration',
+            props.locationBucket,
+            this.locationPrefix,
+            props.permissionModel,
+          );
+          this.lfDataAccessRole.node.addDependency(this.dataLakeSettings);
 
-          this.dataLakeLocation = new CfnResource(this, 'DataLakeLocation', {
-            useServiceLinkedRole: false,
-            roleArn: this.lfDataAccessRole.roleArn,
-            resourceArn: props.locationBucket?.arnForObjects(props.locationPrefix || ''),
-          });
-          // remove IAMAllowedPrincipal
-          this.removeIamAllowedPrincipal = new AwsCustomResource(this, 'AssociateVPCWithHostedZone', {
-            onCreate: {
-              assumedRoleArn: 'arn:aws:iam::OTHERACCOUNT:role/CrossAccount/ManageHostedZoneConnections',
-              service: 'LakeFormation',
-              action: 'AssociateVPCWithHostedZone',
-              parameters: {
-                HostedZoneId: 'hz-123',
-                VPC: {
-                  VPCId: 'vpc-123',
-                  VPCRegion: 'region-for-vpc',
-                },
-              },
-              physicalResourceId: PhysicalResourceId.of('${vpcStack.SharedVpc.VpcId}-${vpcStack.Region}-${PrivateHostedZone.HostedZoneId}'),
-            },
-            //Will ignore any resource and use the assumedRoleArn as resource and 'sts:AssumeRole' for service:action
-            policy: AwsCustomResourcePolicy.fromSdkCalls({
-              resources: AwsCustomResourcePolicy.ANY_RESOURCE,
-            }),
-          });
+          this.cdkLfLocationGrant = grantDataLakeLocation(
+            this, 
+            'CdkLfLocationGrant', 
+            this.dataLakeLocation!.resourceArn,
+            cdkRole,
+          );
+          this.cdkLfLocationGrant.node.addDependency(this.dataLakeLocation!);
         }
       }
     }
@@ -150,15 +149,25 @@ export class DataCatalogDatabase extends TrackedConstruct {
       },
     });
 
+    if (props.permissionModel === PermissionModel.LAKE_FORMATION || props.permissionModel === PermissionModel.HYBRID) {
+      this.database.node.addDependency(this.dataLakeLocation!);
+      this.database.node.addDependency(this.cdkLfLocationGrant!);
+    }
+
+    if (catalogType === CatalogType.S3 && props.permissionModel === PermissionModel.LAKE_FORMATION) {
+      this.removeIamAllowedPrincipal = removeIamAllowedPrincipal(this, 'IamRevoke', this.databaseName);
+      this.removeIamAllowedPrincipal.node.addDependency(this.database);
+    }
+
     let autoCrawl = props.autoCrawl;
 
     if (autoCrawl === undefined || autoCrawl === null) {
       autoCrawl = true;
     }
 
-    const autoCrawlSchedule = props.autoCrawlSchedule || {
-      scheduleExpression: 'cron(1 0 * * ? *)',
-    };
+    // const autoCrawlSchedule = props.autoCrawlSchedule || {
+    //   scheduleExpression: 'cron(1 0 * * ? *)',
+    // };
 
     const currentStack = Stack.of(this);
 
@@ -268,23 +277,23 @@ export class DataCatalogDatabase extends TrackedConstruct {
         },
       }));
 
-      const crawlerName = `${props.name}-${hash.toLowerCase()}-crawler`;
+      // const crawlerName = `${props.name}-${hash.toLowerCase()}-crawler`;
 
-      if (catalogType === CatalogType.S3) {
-        this.crawler = this.handleS3TypeCrawler(props, {
-          autoCrawlSchedule,
-          crawlerName,
-          crawlerSecurityConfigurationName: this.crawlerSecurityConfiguration.name,
-          locationPrefix: locationPrefix!,
-          s3LocationUri: s3LocationUri!,
-        });
-      } else if (catalogType === CatalogType.JDBC) {
-        this.crawler = this.handleJDBCTypeCrawler(props, {
-          autoCrawlSchedule,
-          crawlerName,
-          crawlerSecurityConfigurationName: this.crawlerSecurityConfiguration.name,
-        });
-      }
+      // if (catalogType === CatalogType.S3) {
+      //   [this.crawler, this.crawlerLfDbGrant, this.crawlerLfLocationGrant] = this.handleS3TypeCrawler(props, {
+      //     autoCrawlSchedule,
+      //     crawlerName,
+      //     crawlerSecurityConfigurationName: this.crawlerSecurityConfiguration.name,
+      //     locationPrefix: this.locationPrefix!,
+      //     s3LocationUri: s3LocationUri!,
+      //   });
+      // } else if (catalogType === CatalogType.JDBC) {
+      //   this.crawler = this.handleJDBCTypeCrawler(props, {
+      //     autoCrawlSchedule,
+      //     crawlerName,
+      //     crawlerSecurityConfigurationName: this.crawlerSecurityConfiguration.name,
+      //   });
+      // }
     }
   }
 
@@ -327,24 +336,24 @@ export class DataCatalogDatabase extends TrackedConstruct {
     }));
   }
 
-  /**
-   * Calculate the table depth level based on the location prefix. This is used by the crawler to determine where the table level files are located.
-   * @param locationPrefix `string`
-   * @returns `number`
-   */
-  private calculateDefaultTableLevelDepth(locationPrefix: string): number {
-    const baseCount = 2;
+  // /**
+  //  * Calculate the table depth level based on the location prefix. This is used by the crawler to determine where the table level files are located.
+  //  * @param locationPrefix `string`
+  //  * @returns `number`
+  //  */
+  // private calculateDefaultTableLevelDepth(locationPrefix: string): number {
+  //   const baseCount = 2;
 
-    const locationTokens = locationPrefix.split('/');
+  //   const locationTokens = locationPrefix.split('/');
 
-    let ctrValidToken = 0;
+  //   let ctrValidToken = 0;
 
-    locationTokens.forEach((token) => {
-      ctrValidToken += (token) ? 1 : 0;
-    });
+  //   locationTokens.forEach((token) => {
+  //     ctrValidToken += (token) ? 1 : 0;
+  //   });
 
-    return ctrValidToken + baseCount;
-  }
+  //   return ctrValidToken + baseCount;
+  // }
 
   /**
    * Based on the parameters passed, it would determine type type of target the crawler would used.
@@ -361,127 +370,190 @@ export class DataCatalogDatabase extends TrackedConstruct {
     return CatalogType.INVALID;
   }
 
-  /**
-   * Handle the creation of the crawler with S3 target and its related permissions
-   * @param props `DataCatalogDatabaseProps`
-   * @param s3Props `S3CrawlerProps`
-   * @returns `CfnCrawler`
-   */
-  private handleS3TypeCrawler(props: DataCatalogDatabaseProps, s3Props: S3CrawlerProps): CfnCrawler {
-    const tableLevel = props.crawlerTableLevelDepth || this.calculateDefaultTableLevelDepth(s3Props.locationPrefix);
-    const grantPrefix = s3Props.locationPrefix == '/' ? '' : s3Props.locationPrefix;
-    props.locationBucket!.grantRead(this.crawlerRole!, grantPrefix+'*');
+//   /**
+//    * Handle the creation of the crawler with S3 target and its related permissions
+//    * @param props `DataCatalogDatabaseProps`
+//    * @param s3Props `S3CrawlerProps`
+//    * @returns `CfnCrawler`
+//    */
+//   private handleS3TypeCrawler(
+//     props: DataCatalogDatabaseProps, 
+//     s3Props: S3CrawlerProps
+//   ): [CfnCrawler, CfnPrincipalPermissions | undefined, CfnPermissions | undefined] {
+//     const tableLevel = props.crawlerTableLevelDepth || this.calculateDefaultTableLevelDepth(s3Props.locationPrefix);
+//     const grantPrefix = s3Props.locationPrefix == '/' ? '' : s3Props.locationPrefix;
+//     props.locationBucket!.grantRead(this.crawlerRole!, grantPrefix+'*');
 
-    return new CfnCrawler(this, 'DatabaseAutoCrawler', {
-      role: this.crawlerRole!.roleArn,
-      targets: {
-        s3Targets: [{
-          path: s3Props.s3LocationUri,
-        }],
-      },
-      schedule: s3Props.autoCrawlSchedule,
-      databaseName: this.databaseName,
-      name: s3Props.crawlerName,
-      crawlerSecurityConfiguration: s3Props.crawlerSecurityConfigurationName,
-      configuration: JSON.stringify({
-        Version: 1.0,
-        Grouping: {
-          TableLevelConfiguration: tableLevel,
-        },
-      }),
-    });
-  }
+//     let useLakeFormation = false;
+//     let lfDbGrant: CfnPrincipalPermissions | undefined;
+//     let lfLocationGrant: CfnPermissions | undefined;
 
-  /**
-   * Handle the creation of the crawler with JDBC target and its related permissions
-   * @param props `DataCatalogDatabaseProps`
-   * @param jdbcProps `CrawlerProps`
-   * @returns `CfnCrawler`
-   */
-  private handleJDBCTypeCrawler(props: DataCatalogDatabaseProps, jdbcProps: CrawlerProps): CfnCrawler {
-    props.jdbcSecret!.grantRead(this.crawlerRole!);
-    props.jdbcSecretKMSKey!.grantDecrypt(this.crawlerRole!);
+//     if (props.permissionModel === PermissionModel.HYBRID || props.permissionModel === PermissionModel.LAKE_FORMATION) {
+//       useLakeFormation = true;
 
-    const currentStack = Stack.of(this);
+//       this.crawlerRole!.attachInlinePolicy(new Policy(this, 'CrawlerLfDataAccess', {
+//         statements: [
+//           new PolicyStatement({
+//             effect: Effect.ALLOW,
+//             actions: [
+//               'lakeformation:GetDataAccess',
+//             ],
+//             resources: ['*'],
+//           }),
+//         ],
+//       }));
 
-    const policyConnection = this.crawlerRole!.addToPrincipalPolicy(new PolicyStatement({
-      effect: Effect.ALLOW,
-      actions: [
-        'glue:GetConnection',
-        'glue:GetConnections',
-      ],
-      resources: [
-        `arn:aws:glue:${currentStack.region}:${currentStack.account}:connection/${props.glueConnectionName}`,
-        `arn:aws:glue:${currentStack.region}:${currentStack.account}:catalog`,
-      ],
-    }));
+//       lfLocationGrant = new CfnPermissions(this, 'CrawlerLfLocationGrant', {
+//         permissions: [' DATA_LOCATION_ACCESS'],
+//         permissionsWithGrantOption: [],
+//         dataLakePrincipal: {
+//           dataLakePrincipalIdentifier: this.crawlerRole?.roleArn,
+//         },
+//         resource: {
+//           dataLocationResource: {
+//             catalogId: Stack.of(this).account,
+//             s3Resource: props.locationBucket!.arnForObjects(this.locationPrefix || ''),
+//           },
+//         },
+//       });
 
-    const policyNetworking = this.crawlerRole!.addToPrincipalPolicy(new PolicyStatement({
-      effect: Effect.ALLOW,
-      actions: [
-        'ec2:DescribeVpcEndpoints',
-        'ec2:DescribeRouteTables',
-        'ec2:CreateNetworkInterface',
-        'ec2:DeleteNetworkInterface',
-        'ec2:DescribeNetworkInterfaces',
-        'ec2:DescribeSecurityGroups',
-        'ec2:DescribeSubnets',
-        'ec2:DescribeVpcAttribute',
-      ],
-      resources: [
-        '*',
-      ],
-    }));
+//       lfDbGrant = new CfnPrincipalPermissions(this, 'CrawlerLfDbGrant', {
+//         permissions: ['CREATE_TABLE'],
+//         permissionsWithGrantOption: [],
+//         principal: {
+//           dataLakePrincipalIdentifier: this.crawlerRole?.roleArn,
+//         },
+//         resource: {
+//           database: {
+//             catalogId: Stack.of(this).account,
+//             name: this.databaseName,
+//           },
+//         },
+//       });
+//       lfLocationGrant.node.addDependency(this.dataLakeLocation!);
+//       lfDbGrant.node.addDependency(this.database);
+//     }
 
-    const policyIam = this.crawlerRole!.addToPrincipalPolicy(new PolicyStatement({
-      effect: Effect.ALLOW,
-      actions: [
-        'iam:PassRole',
-      ],
-      resources: [
-        this.crawlerRole!.roleArn,
-      ],
-    }));
+//     const crawler = new CfnCrawler(this, 'DatabaseAutoCrawler', {
+//       role: this.crawlerRole!.roleArn,
+//       targets: {
+//         s3Targets: [{
+//           path: s3Props.s3LocationUri,
+//         }],
+//       },
+//       schedule: s3Props.autoCrawlSchedule,
+//       databaseName: this.databaseName,
+//       name: s3Props.crawlerName,
+//       crawlerSecurityConfiguration: s3Props.crawlerSecurityConfigurationName,
+//       configuration: JSON.stringify({
+//         Version: 1.0,
+//         Grouping: {
+//           TableLevelConfiguration: tableLevel,
+//         },
+//       }),
+//       lakeFormationConfiguration: {
+//         useLakeFormationCredentials: useLakeFormation,
+//       },
+//     });
+//     crawler.node.addDependency(this.database);
+//     if (props.permissionModel === PermissionModel.HYBRID || props.permissionModel === PermissionModel.LAKE_FORMATION) {
+//       crawler.node.addDependency(lfDbGrant!);
+//       crawler.node.addDependency(lfLocationGrant!);
+//     }
 
-    const policyTags = this.crawlerRole!.addToPrincipalPolicy(new PolicyStatement({
-      effect: Effect.ALLOW,
-      actions: [
-        'ec2:CreateTags',
-        'ec2:DeleteTags',
-      ],
-      resources: ['*'],
-      conditions: {
-        'ForAllValues:StringEquals': {
-          'aws:TagKeys': [
-            'aws-glue-service-resource',
-          ],
-        },
-      },
-    }));
+//     return [crawler, lfDbGrant, lfLocationGrant];
+//   }
 
-    const crawler = new CfnCrawler(this, 'DatabaseAutoCrawler', {
-      role: this.crawlerRole!.roleArn,
-      targets: {
-        jdbcTargets: [
-          {
-            connectionName: props.glueConnectionName!,
-            path: props.jdbcPath,
-          },
-        ],
-      },
-      schedule: jdbcProps.autoCrawlSchedule,
-      databaseName: this.databaseName,
-      name: jdbcProps.crawlerName,
-      crawlerSecurityConfiguration: jdbcProps.crawlerSecurityConfigurationName,
-    });
+//   /**
+//    * Handle the creation of the crawler with JDBC target and its related permissions
+//    * @param props `DataCatalogDatabaseProps`
+//    * @param jdbcProps `CrawlerProps`
+//    * @returns `CfnCrawler`
+//    */
+//   private handleJDBCTypeCrawler(props: DataCatalogDatabaseProps, jdbcProps: CrawlerProps): CfnCrawler {
+//     props.jdbcSecret!.grantRead(this.crawlerRole!);
+//     props.jdbcSecretKMSKey!.grantDecrypt(this.crawlerRole!);
 
-    crawler.node.addDependency(policyConnection.policyDependable!
-      , policyNetworking.policyDependable!
-      , policyIam.policyDependable!
-      , policyTags.policyDependable!);
+//     const currentStack = Stack.of(this);
 
-    return crawler;
-  }
+//     const policyConnection = this.crawlerRole!.addToPrincipalPolicy(new PolicyStatement({
+//       effect: Effect.ALLOW,
+//       actions: [
+//         'glue:GetConnection',
+//         'glue:GetConnections',
+//       ],
+//       resources: [
+//         `arn:aws:glue:${currentStack.region}:${currentStack.account}:connection/${props.glueConnectionName}`,
+//         `arn:aws:glue:${currentStack.region}:${currentStack.account}:catalog`,
+//       ],
+//     }));
+
+//     const policyNetworking = this.crawlerRole!.addToPrincipalPolicy(new PolicyStatement({
+//       effect: Effect.ALLOW,
+//       actions: [
+//         'ec2:DescribeVpcEndpoints',
+//         'ec2:DescribeRouteTables',
+//         'ec2:CreateNetworkInterface',
+//         'ec2:DeleteNetworkInterface',
+//         'ec2:DescribeNetworkInterfaces',
+//         'ec2:DescribeSecurityGroups',
+//         'ec2:DescribeSubnets',
+//         'ec2:DescribeVpcAttribute',
+//       ],
+//       resources: [
+//         '*',
+//       ],
+//     }));
+
+//     const policyIam = this.crawlerRole!.addToPrincipalPolicy(new PolicyStatement({
+//       effect: Effect.ALLOW,
+//       actions: [
+//         'iam:PassRole',
+//       ],
+//       resources: [
+//         this.crawlerRole!.roleArn,
+//       ],
+//     }));
+
+//     const policyTags = this.crawlerRole!.addToPrincipalPolicy(new PolicyStatement({
+//       effect: Effect.ALLOW,
+//       actions: [
+//         'ec2:CreateTags',
+//         'ec2:DeleteTags',
+//       ],
+//       resources: ['*'],
+//       conditions: {
+//         'ForAllValues:StringEquals': {
+//           'aws:TagKeys': [
+//             'aws-glue-service-resource',
+//           ],
+//         },
+//       },
+//     }));
+
+//     const crawler = new CfnCrawler(this, 'DatabaseAutoCrawler', {
+//       role: this.crawlerRole!.roleArn,
+//       targets: {
+//         jdbcTargets: [
+//           {
+//             connectionName: props.glueConnectionName!,
+//             path: props.jdbcPath,
+//           },
+//         ],
+//       },
+//       schedule: jdbcProps.autoCrawlSchedule,
+//       databaseName: this.databaseName,
+//       name: jdbcProps.crawlerName,
+//       crawlerSecurityConfiguration: jdbcProps.crawlerSecurityConfigurationName,
+//     });
+
+//     crawler.node.addDependency(policyConnection.policyDependable!
+//       , policyNetworking.policyDependable!
+//       , policyIam.policyDependable!
+//       , policyTags.policyDependable!);
+
+//     return crawler;
+//   }
 }
 
 /**
@@ -493,19 +565,19 @@ enum CatalogType {
   INVALID
 }
 
-/**
- * Internal base interface for the crawler parameters
- */
-interface CrawlerProps {
-  crawlerName: string;
-  autoCrawlSchedule: CfnCrawler.ScheduleProperty;
-  crawlerSecurityConfigurationName: string;
-}
+// /**
+//  * Internal base interface for the crawler parameters
+//  */
+// interface CrawlerProps {
+//   crawlerName: string;
+//   autoCrawlSchedule: CfnCrawler.ScheduleProperty;
+//   crawlerSecurityConfigurationName: string;
+// }
 
-/**
- * Internal interface for the s3 target crawler parameters
- */
-interface S3CrawlerProps extends CrawlerProps {
-  locationPrefix: string;
-  s3LocationUri: string;
-}
+// /**
+//  * Internal interface for the s3 target crawler parameters
+//  */
+// interface S3CrawlerProps extends CrawlerProps {
+//   locationPrefix: string;
+//   s3LocationUri: string;
+// }

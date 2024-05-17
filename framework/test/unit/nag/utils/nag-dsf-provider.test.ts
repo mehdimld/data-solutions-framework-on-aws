@@ -155,6 +155,8 @@ NagSuppressions.addResourceSuppressionsByPath(
   'Stack/Provider/CustomResourceProvider/waiter-state-machine',
   [
     { id: 'AwsSolutions-IAM5', reason: 'State machine not configurable and provided by the CDK L2 construct for Custom resource provider' },
+    { id: 'AwsSolutions-SF1', reason: 'Logging is not required for the waiter state machine' },
+    { id: 'AwsSolutions-SF2', reason: 'X-ray is not required for the waiter state machine' },
   ],
   true,
 );

@@ -88,6 +88,8 @@ NagSuppressions.addResourceSuppressionsByPath(stack, [
   { id: 'AwsSolutions-IAM4', reason: 'Resource is not part of the test scope' },
   { id: 'AwsSolutions-IAM5', reason: 'Resource is not part of the test scope' },
   { id: 'AwsSolutions-L1', reason: 'Resource is not part of the test scope' },
+  { id: 'AwsSolutions-SF1', reason: 'Resource is not part of the test scope' },
+  { id: 'AwsSolutions-SF2', reason: 'Resource is not part of the test scope' },
 ], true);
 
 test('No unsuppressed Warnings', () => {
