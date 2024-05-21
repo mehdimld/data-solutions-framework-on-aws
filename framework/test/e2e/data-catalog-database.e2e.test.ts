@@ -37,7 +37,7 @@ const database = new DataCatalogDatabase(stack, 'TestDatabase', {
   permissionModel: PermissionModel.IAM,
 });
 
-new DataCatalogDatabase(stack, 'TestDatabase2', {
+const database2 = new DataCatalogDatabase(stack, 'TestDatabase2', {
   locationBucket: bucket,
   locationPrefix: 'test_database2',
   name: 'test_database2',
@@ -45,7 +45,7 @@ new DataCatalogDatabase(stack, 'TestDatabase2', {
   permissionModel: PermissionModel.HYBRID,
 });
 
-new DataCatalogDatabase(stack, 'TestDatabase3', {
+const database3 = new DataCatalogDatabase(stack, 'TestDatabase3', {
   locationBucket: bucket,
   locationPrefix: 'test_database3',
   name: 'test_database3',
@@ -64,6 +64,16 @@ new CfnOutput(stack, 'DatabaseName', {
   exportName: 'DatabaseName',
 });
 
+new CfnOutput(stack, 'DatabaseName2', {
+  value: database2.databaseName,
+  exportName: 'DatabaseName2',
+});
+
+new CfnOutput(stack, 'DatabaseName3', {
+  value: database3.databaseName,
+  exportName: 'DatabaseName3',
+});
+
 let deployResult: Record<string, string>;
 
 beforeAll(async() => {
@@ -71,9 +81,9 @@ beforeAll(async() => {
 }, 900000);
 
 test('Database in data catalog is created', async() => {
-  expect(deployResult.DatabaseName).toContain('test-database');
-
-
+  expect(deployResult.DatabaseName).toContain('test_database');
+  expect(deployResult.DatabaseName2).toContain('test_database2');
+  expect(deployResult.DatabaseName3).toContain('test_database3');
 });
 
 // afterAll(async () => {

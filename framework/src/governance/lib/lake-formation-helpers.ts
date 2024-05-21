@@ -1,8 +1,8 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { Duration, Stack } from 'aws-cdk-lib';
-import { IRole, ISamlProvider, IUser, Role, ServicePrincipal } from 'aws-cdk-lib/aws-iam';
+import { Duration, RemovalPolicy, Stack } from 'aws-cdk-lib';
+import { Effect, IRole, ISamlProvider, IUser, PolicyStatement, Role, ServicePrincipal } from 'aws-cdk-lib/aws-iam';
 import { CfnDataLakeSettings, CfnPermissions, CfnResource } from 'aws-cdk-lib/aws-lakeformation';
 import { RetentionDays } from 'aws-cdk-lib/aws-logs';
 import { IBucket } from 'aws-cdk-lib/aws-s3';
@@ -89,12 +89,14 @@ export function registerS3Location(
  * @param database the database to remove the IAMAllowedPrincipal permission
  * @return the CfnDataLakeSettings to remove the IAMAllowedPrincipal permission
  */
-export function removeIamAllowedPrincipal(scope: Construct, id: string, database: string): AwsCustomResource {
+export function removeIamAllowedPrincipal(scope: Construct, id: string, database: string, execRole: IRole, removalPolicy: RemovalPolicy): AwsCustomResource {
 
   const stack = Stack.of(scope);
 
   // eslint-disable-next-line local-rules/no-tokens-in-construct-id
-  return new AwsCustomResource(scope, id, {
+  const cr = new AwsCustomResource(scope, id, {
+    removalPolicy,
+    role: execRole,
     onCreate: {
       service: 'LakeFormation',
       action: 'RevokePermissions',
@@ -111,13 +113,30 @@ export function removeIamAllowedPrincipal(scope: Construct, id: string, database
       },
       physicalResourceId: PhysicalResourceId.of(`${database}`),
     },
-    //Will ignore any resource and use the assumedRoleArn as resource and 'sts:AssumeRole' for service:action
-    policy: AwsCustomResourcePolicy.fromSdkCalls({
-      resources: [`arn:${stack.partition}:glue:${stack.region}:${stack.account}:database/${database}`],
-    }),
+    policy: AwsCustomResourcePolicy.fromStatements([
+      new PolicyStatement({
+        actions: ['lakeformation:RevokePermissions'],
+        effect: Effect.ALLOW,
+        resources: [
+          `arn:${stack.partition}:lakeformation:${stack.region}:${stack.account}:catalog:${stack.account}`
+        ]
+      }),
+      new PolicyStatement({
+        actions: [
+          'glue:GetDatabase',
+          ],
+        effect: Effect.ALLOW,
+        resources: [
+          `arn:${stack.partition}:glue:${stack.region}:${stack.account}:database/${database}`,
+          `arn:${stack.partition}:glue:${stack.region}:${stack.account}:catalog`
+
+      ]})
+    ]),
     logRetention: RetentionDays.ONE_WEEK,
     timeout: Duration.seconds(60)
   });
+
+  return cr;
 }
 
 /**

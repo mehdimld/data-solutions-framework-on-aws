@@ -5,6 +5,7 @@ import { RemovalPolicy } from 'aws-cdk-lib';
 import { CfnCrawler } from 'aws-cdk-lib/aws-glue';
 import { IKey } from 'aws-cdk-lib/aws-kms';
 import { DataLakeStorage } from '../../storage';
+import { PermissionModel } from '../../utils';
 
 /**
  * Properties for the `DataLakeCatalog` Construct
@@ -54,4 +55,10 @@ export interface DataLakeCatalogProps {
    * @default - The resources are not deleted (`RemovalPolicy.RETAIN`).
    */
   readonly removalPolicy?: RemovalPolicy;
+  
+  /**
+   * The permission model to apply to the Glue Database.
+   * @default - IAM permission model is used
+   */
+  readonly permissionModel?: PermissionModel;
 }
