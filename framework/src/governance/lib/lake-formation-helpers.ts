@@ -145,14 +145,15 @@ export function removeIamAllowedPrincipal(scope: Construct, id: string, database
  * @param id the construct id
  * @param location the Amazon S3 location in ARN format
  * @param principal the IAM Principal to grant Lake Formation access on Data Lake Location
+ * @param grantable whether the grantable permission is set. @default - false
  * @return the CfnPermissions to grant Lake Formation access on Data Lake Location
  */
 
-export function grantDataLakeLocation(scope: Construct, id: string, location: string, principal: IRole): CfnPermissions {
+export function grantDataLakeLocation(scope: Construct, id: string, location: string, principal: IRole, grantable?: boolean): CfnPermissions {
 
   return new CfnPermissions(scope, id, {
     permissions: ['DATA_LOCATION_ACCESS'],
-    permissionsWithGrantOption: [],
+    permissionsWithGrantOption: grantable === true ? ['DATA_LOCATION_ACCESS']: [],
     dataLakePrincipal: {
       dataLakePrincipalIdentifier: principal.roleArn,
     },

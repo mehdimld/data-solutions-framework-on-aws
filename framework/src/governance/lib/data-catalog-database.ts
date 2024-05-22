@@ -87,6 +87,10 @@ export class DataCatalogDatabase extends TrackedConstruct {
    */
   readonly lfRevokeRoleGrant?: CfnDataLakeSettings;
   /**
+   * The Lake Formation grant on the data location for the CDK role
+   */
+  readonly cdkLfLocationGrant?: CfnPermissions;
+  /**
    * Caching constructor properties for internal reuse by constructor methods
    */
   private dataCatalogDatabaseProps: DataCatalogDatabaseProps;
@@ -139,13 +143,13 @@ export class DataCatalogDatabase extends TrackedConstruct {
           );
           this.lfDataAccessRole.node.addDependency(this.dataLakeSettings);
 
-          // this.cdkLfLocationGrant = grantDataLakeLocation(
-          //   this, 
-          //   'CdkLfLocationGrant', 
-          //   this.dataLakeLocation!.resourceArn,
-          //   cdkRole,
-          // );
-          // this.cdkLfLocationGrant.node.addDependency(this.dataLakeLocation!);
+          this.cdkLfLocationGrant = grantDataLakeLocation(
+            this, 'CdkLfLocationGrant', 
+            this.dataLakeLocation!.resourceArn,
+            cdkRole,
+            true
+          );
+          this.cdkLfLocationGrant.node.addDependency(this.dataLakeLocation!);
         }
       }
     }
@@ -457,6 +461,7 @@ export class DataCatalogDatabase extends TrackedConstruct {
       });
 
       lfLocationGrant.node.addDependency(this.dataLakeLocation!);
+      lfLocationGrant.node.addDependency(this.cdkLfLocationGrant!);
       lfDbGrant.node.addDependency(this.database);
       lfTablesGrant.node.addDependency(this.database);
     }
