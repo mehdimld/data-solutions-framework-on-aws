@@ -3,40 +3,33 @@
 
 import { Duration, RemovalPolicy, Stack } from 'aws-cdk-lib';
 import { Effect, IRole, ISamlProvider, IUser, PolicyStatement, Role, ServicePrincipal } from 'aws-cdk-lib/aws-iam';
-import { CfnDataLakeSettings, CfnPermissions, CfnResource } from 'aws-cdk-lib/aws-lakeformation';
+import { CfnDataLakeSettings, CfnPrincipalPermissions, CfnResource } from 'aws-cdk-lib/aws-lakeformation';
 import { RetentionDays } from 'aws-cdk-lib/aws-logs';
 import { IBucket } from 'aws-cdk-lib/aws-s3';
 import { AwsCustomResource, AwsCustomResourcePolicy, PhysicalResourceId } from 'aws-cdk-lib/custom-resources';
 import { Construct } from 'constructs';
 import { PermissionModel } from '../../utils';
 
-
 /**
- * Grant Lake Formation admin role to a principal.
+ * Configure the DataLakeSettings of LakeFormation
  * @param scope the construct scope
  * @param id the construct id
- * @param principal the IAM Principal to grant Lake Formation admin role. Can be an IAM User, an IAM Role or a SAML identity
- * @return the CfnDataLakeSettings to set the principal as Lake Formation admin
+ * @param principals the list of principals to add as LakeFormation admin
+ * @returns the CfnDataLakeSettings to configure Lake Formation
  */
-export function grantLfAdminRole(scope: Construct, id: string, principal: IRole|IUser|[ISamlProvider, string]): CfnDataLakeSettings {
-
-  // Check if the principal is an Amazon IAM Role or User and extract the arn and name
-  let principalArn: string;
-  if ((principal as IRole).roleArn) {
-    principalArn = (principal as IRole).roleArn;
-  } else if ((principal as IUser).userArn) {
-    principalArn = (principal as IUser).userArn;
-  } else {
-    const samlIdentity = (principal as [ISamlProvider, string]) ;
-    principalArn = samlIdentity[0].samlProviderArn + samlIdentity[1];
+export function putDataLakeSettings(scope: Construct, id: string, principals: (IRole|IUser|[ISamlProvider, string])[]): CfnDataLakeSettings {
+  
+  // Check if the principals are Amazon IAM Roles or Users and extract the arns and names
+  const principalArns: CfnDataLakeSettings.DataLakePrincipalProperty[] = [];
+  for (const principal of principals) {
+    const principalId = getPrincipalArn(principal);
+    principalArns.push({
+      dataLakePrincipalIdentifier: principalId
+    });
   }
 
   return new CfnDataLakeSettings(scope, id, {
-    admins: [
-      {
-        dataLakePrincipalIdentifier: principalArn,
-      },
-    ],
+    admins: principalArns,
     mutationType: 'APPEND',
     parameters: {
       CROSS_ACCOUNT_VERSION: 4,
@@ -67,7 +60,7 @@ export function registerS3Location(
     assumedBy: new ServicePrincipal('lakeformation.amazonaws.com'),
   });
 
-  const grantRead = locationBucket.grantReadWrite(lfDataAccessRole, locationPrefix);
+  const grantReadWrite = locationBucket.grantReadWrite(lfDataAccessRole, locationPrefix);
 
   const dataLakeLocation = new CfnResource(scope, `${id}DataLakeLocation`, {
     hybridAccessEnabled: accessMode === PermissionModel.HYBRID ? true : false,
@@ -76,20 +69,20 @@ export function registerS3Location(
     resourceArn: locationBucket.arnForObjects(locationPrefix),
   });
 
-  dataLakeLocation.node.addDependency(grantRead);
+  dataLakeLocation.node.addDependency(grantReadWrite);
 
   return [lfDataAccessRole, dataLakeLocation];
 
 }
 
 /**
- * Remove the IAMAllowedPrincipal permission from the database.
+ * Revoke the IAMAllowedPrincipal permissions from the database.
  * @param scope the construct scope
  * @param id the construct id
  * @param database the database to remove the IAMAllowedPrincipal permission
  * @return the CfnDataLakeSettings to remove the IAMAllowedPrincipal permission
  */
-export function removeIamAllowedPrincipal(scope: Construct, id: string, database: string, execRole: IRole, removalPolicy: RemovalPolicy): AwsCustomResource {
+export function revokeIamAllowedPrincipal(scope: Construct, id: string, database: string, execRole: IRole, removalPolicy: RemovalPolicy): AwsCustomResource {
 
   const stack = Stack.of(scope);
 
@@ -149,19 +142,82 @@ export function removeIamAllowedPrincipal(scope: Construct, id: string, database
  * @return the CfnPermissions to grant Lake Formation access on Data Lake Location
  */
 
-export function grantDataLakeLocation(scope: Construct, id: string, location: string, principal: IRole, grantable?: boolean): CfnPermissions {
+export function grantDataLakeLocation(scope: Construct, id: string, location: string, principal: IRole, grantable?: boolean): CfnPrincipalPermissions {
 
-  return new CfnPermissions(scope, id, {
+  return new CfnPrincipalPermissions(scope, id, {
     permissions: ['DATA_LOCATION_ACCESS'],
     permissionsWithGrantOption: grantable === true ? ['DATA_LOCATION_ACCESS']: [],
-    dataLakePrincipal: {
+    principal: {
       dataLakePrincipalIdentifier: principal.roleArn,
     },
     resource: {
-      dataLocationResource: {
+      dataLocation: {
         catalogId: Stack.of(scope).account,
-        s3Resource: location,
+        resourceArn: location,
       },
     },
   });
+}
+
+/**
+ * Grant Lake Formation permissions required by crawlers
+ * @param scope the construct scope
+ * @param id the construct id
+ * @param database the database to grant Lake Formation permissions 
+ * @param principal the IAM Principal to grant Lake Formation permissions
+ * @return the CfnPrincipalPermissions granting Lake Formation permissions
+ */
+export function grantCrawler(scope: Construct, id: string, database: string, principal: IRole): [CfnPrincipalPermissions, CfnPrincipalPermissions] {
+
+  const lfDbGrant = new CfnPrincipalPermissions(scope, `${id}LfDbGrant`, {
+    permissions: ['CREATE_TABLE'],
+    permissionsWithGrantOption: [],
+    principal: {
+      dataLakePrincipalIdentifier: getPrincipalArn(principal),
+    },
+    resource: {
+      database: {
+        catalogId: Stack.of(scope).account,
+        name: database,
+      },
+    },
+  });
+
+  const lfTablesGrant = new CfnPrincipalPermissions(scope, `${id}LfTablesGrant`, {
+    permissions: ["SELECT", "DESCRIBE", "ALTER"],
+    permissionsWithGrantOption: [],
+    principal: {
+      dataLakePrincipalIdentifier: getPrincipalArn(principal),
+    },
+    resource: {
+      table: {
+        catalogId: Stack.of(scope).account,
+        tableWildcard: {},
+        databaseName: database,
+      },
+    },
+  });
+
+  return [lfDbGrant, lfTablesGrant];
+}
+
+/**
+ * Extract the principalArn (Arn) from the IAM Principal
+ * @param principal the IAM Principal to extract the principal id from
+ * @returns the principal ARN
+ */
+function getPrincipalArn(principal: IRole | IUser | [ISamlProvider, string] ): string {
+  
+  let principalArn: string;
+  
+  if ((principal as IRole).roleArn) {
+    principalArn = (principal as IRole).roleArn;
+  } else if ((principal as IUser).userArn) {
+    principalArn = (principal as IUser).userArn;
+  } else {
+    const samlIdentity = (principal as [ISamlProvider, string]);
+    principalArn = samlIdentity[0].samlProviderArn + samlIdentity[1];
+  }
+
+  return principalArn;
 }

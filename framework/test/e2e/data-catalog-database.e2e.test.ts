@@ -86,6 +86,6 @@ test('Database in data catalog is created', async() => {
   expect(deployResult.DatabaseName3).toContain('test_database3');
 });
 
-// afterAll(async () => {
-//   await testStack.destroy();
-// }, 900000);
+afterAll(async () => {
+  await testStack.destroy();
+}, 900000);

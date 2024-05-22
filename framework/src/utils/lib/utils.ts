@@ -107,6 +107,6 @@ export class Utils {
   public static getCdkDeploymentRole(scope: Construct): IRole {
     const stack = Stack.of(scope);
     const synthesizer = stack.synthesizer as DefaultStackSynthesizer;
-    return Role.fromRoleArn(scope, 'CdkRole', Fn.sub(synthesizer.deployRoleArn));
+    return Role.fromRoleArn(scope, 'CdkRole', Fn.sub(synthesizer.cloudFormationExecutionRoleArn));
   }
 }
