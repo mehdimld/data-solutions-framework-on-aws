@@ -2,10 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Duration, RemovalPolicy } from 'aws-cdk-lib';
-import { CfnEventBusPolicy, IRule } from 'aws-cdk-lib/aws-events';
-import { IRole, Role, ServicePrincipal, ManagedPolicy, PolicyDocument, PolicyStatement, Effect } from 'aws-cdk-lib/aws-iam';
+import { IRole, Role, ServicePrincipal, ManagedPolicy, PolicyDocument, PolicyStatement, Effect, Grant } from 'aws-cdk-lib/aws-iam';
 import { IFunction, Function, Runtime, Code } from 'aws-cdk-lib/aws-lambda';
-import { IStateMachine } from 'aws-cdk-lib/aws-stepfunctions';
 import { Construct } from 'constructs';
 import { DataZoneMskCentralAuthorizer } from './datazone-msk-central-authorizer';
 import { DataZoneMskEnvironmentAuthorizerProps } from './datazone-msk-environment-authorizer-props';
@@ -34,25 +32,13 @@ export class DataZoneMskEnvironmentAuthorizer extends TrackedConstruct {
    */
   public readonly grantFunction: IFunction;
   /**
-   * The event bus policy used to receive events from the central authorizer
+   * The assume role policy used by the central authorizer to assume the grant function role
    */
-  public readonly eventBusPolicy?: CfnEventBusPolicy;
+  public readonly assumeRoleGrant: Grant;
   /**
-   * The dead letter queue for the events
+   * The Lambda resource policy grant to allow the central authorizer to invoke the grant function
    */
-  public readonly deadLetterQueue: any;
-  /**
-   * The role used by the events to trigger the authorizer workflow
-   */
-  public readonly eventRole: IRole;
-  /**
-   * The event rule used to trigger the authorizer workflow
-   */
-  public readonly eventRule: IRule;
-  /**
-   * The state machine used to orchestrate the authorizer workflow
-   */
-  public readonly stateMachine: IStateMachine;
+  public readonly lambdaInvokeGrant: Grant;
 
   private readonly removalPolicy: RemovalPolicy;
 
@@ -115,16 +101,10 @@ export class DataZoneMskEnvironmentAuthorizer extends TrackedConstruct {
       DataZoneMskCentralAuthorizer.AUTHORIZER_NAME,
       this.grantFunction,
       props.centralAccountId,
-      Duration.minutes(2),
-      0,
-      this.removalPolicy,
     );
 
-    this.eventBusPolicy = customAuthorizer.eventBusPolicy;
-    this.deadLetterQueue = customAuthorizer.deadLetterQueue;
-    this.eventRole = customAuthorizer.eventRole;
-    this.eventRule = customAuthorizer.eventRule;
-    this.stateMachine = customAuthorizer.stateMachine;
+    this.assumeRoleGrant = customAuthorizer.assumeRoleGrant;
+    this.lambdaInvokeGrant = customAuthorizer.lambdaInvokeGrant;
 
   }
 }
