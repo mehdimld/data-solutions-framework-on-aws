@@ -127,6 +127,8 @@ export function authorizerCentralWorkflowSetup(
     errorPath: '$.ErrorInfo',
   }));
 
+  //TODO check error and cause path when calling directly the lambda
+
   metadataCollector.addCatch(failure, {
     errors: ['States.TaskFailed'],
     resultPath: '$.ErrorInfo',
