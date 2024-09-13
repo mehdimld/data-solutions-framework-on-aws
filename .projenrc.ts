@@ -540,7 +540,7 @@ datazoneMskGovernance.addTask('test:e2e', {
 });
 const datazoneMskGovernanceSynthTask = datazoneMskGovernance.tasks.tryFind('synth:silent')!;
 datazoneMskGovernanceSynthTask.reset();
-datazoneMskGovernanceSynthTask.exec(`npx aws-cdk@${CDK_VERSION} synth -q`);
+datazoneMskGovernanceSynthTask.exec(`CENTRAL_ACCOUNT=0000 PRODUCER_ACCOUNT=1111 CONSUMER_ACCOUNT=2222 npx aws-cdk@${CDK_VERSION} synth -q`);
 const buildDatazoneMskGovernanceTask = datazoneMskGovernance.addTask('build-example', {
   steps: [
     { exec: `pip install --ignore-installed --no-deps --no-index --find-links ../../framework/dist/python cdklabs.aws_data_solutions_framework` },

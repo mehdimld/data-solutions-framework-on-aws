@@ -11,16 +11,28 @@ from stacks.consumer_stack import ConsumerStack
 app = cdk.App()
 CentralStack(app, 
              "CentralStack", 
-             env=cdk.Environment(account=os.getenv('CENTRAL_ACCOUNT'), region=os.getenv('CDK_DEFAULT_REGION')))
+             env=cdk.Environment(
+                #  account=os.getenv('CENTRAL_ACCOUNT'), 
+                #  region=os.getenv('CDK_DEFAULT_REGION')
+                 )
+             )
 
 producer_stack = ProducerStack(app, 
                                "ProducerStack",
-                               env=cdk.Environment(account=os.getenv('PRODUCER_ACCOUNT'), region=os.getenv('CDK_DEFAULT_REGION')))
+                               env=cdk.Environment(
+                                #    account=os.getenv('PRODUCER_ACCOUNT'), 
+                                #    region=os.getenv('CDK_DEFAULT_REGION')
+                                   )
+                               )
 
 ConsumerStack(app,
               "ConsumerStack",
               msk_vpc=producer_stack.msk_vpc,
               msk_security_group=producer_stack.msk_security_group,
-              env=cdk.Environment(account=os.getenv('CONSUMER_ACCOUNT'), region=os.getenv('CDK_DEFAULT_REGION')))
+              env=cdk.Environment(
+                #   account=os.getenv('CONSUMER_ACCOUNT'), 
+                #   region=os.getenv('CDK_DEFAULT_REGION')
+                  )
+              )
 
 app.synth()
