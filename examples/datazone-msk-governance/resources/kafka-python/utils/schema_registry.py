@@ -39,7 +39,6 @@ def get_schema_from_glue(schema_name: str, schema_version: str = None) -> Schema
             },
             SchemaVersionNumber=version_number
         )
-        print(response)
 
         schema_definition = json.loads(response['SchemaDefinition'])
         fields = [{"name": field["name"], "type": field["type"]} for field in schema_definition['fields']]

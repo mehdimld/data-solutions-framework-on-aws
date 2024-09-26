@@ -52,7 +52,7 @@ def emit_event(client: OpenLineageClient, run_id: str, job_name: str, state: str
     cluster_name = config['kafka']['cluster_name']
 
     # Create Job and Run objects
-    job = Job(namespace=f"kafka://{cluster_name}", name=job_name)
+    job = Job(namespace=f"{cluster_name}", name=job_name)
     run = Run(run_id)
 
     # Determine whether datasets are inputs or outputs

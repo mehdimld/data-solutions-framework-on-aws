@@ -36,21 +36,13 @@ class DataZoneTransport(Transport):
         if not isinstance(event, (RunEvent, event_v2.RunEvent)):
             return
 
-
-            # Send the event to DataZone using the AWS SDK (boto3)
-        print("sending event to datazone")
         test=Serde.to_json(event).encode("utf-8")
-        print(test)
         self.datazone.post_lineage_event(domainIdentifier=self.config.domain_id, event=test)
 
     def _setup_datazone(self) -> None:
         try:
             # Set up the boto3 DataZone client with the specified region
             self.datazone = boto3.client("datazone", region_name=self.config.region)
-            print("starting datazone client")
-            #datazoneurl="https://datazone.us-east-1.amazonaws.com"
-            #session=boto3.Session()
-            #self.datazone = session.client("datazone",endpoint_url=datazoneurl,region_name=self.config.region)
         except ModuleNotFoundError:
             logging.error(
                 "boto3 module not found. Installing it is required for DataZoneTransport to work."
