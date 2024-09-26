@@ -1,0 +1,11 @@
+transport:
+  type: file
+  location: /Users/fmorillo/Documents/datazone-lineage/KafkaConnectors18/src/main/resources/openlineage.txt
+
+  #url: https://4j32f8i0d6.execute-api.us-east-1.amazonaws.com/prod/datazone
+dataset:
+  namespaceResolvers:
+    cluster-serverless3f8 :
+      type: hostList
+      hosts:
+        - localhost:9092
