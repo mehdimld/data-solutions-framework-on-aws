@@ -1,20 +1,15 @@
-import yaml
 from aws_schema_registry import SchemaRegistryClient, Schema
 from aws_schema_registry.adapter.kafka import KafkaSerializer
 from aws_schema_registry.avro import AvroSchema
 from openlineage.client.facet import SchemaDatasetFacet, SchemaField
 import boto3
-from common import load_config
 import json
 import logging
+import os
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-def load_config():
-    """Load configuration from config.yaml"""
-    with open('config.yaml', 'r') as config_file:
-        return yaml.safe_load(config_file)
 
 def load_avro_schema(schema_file_path: str) -> AvroSchema:
     """Load Avro schema from a given file path."""
@@ -24,8 +19,7 @@ def load_avro_schema(schema_file_path: str) -> AvroSchema:
 
 def get_schema_from_glue(schema_name: str, schema_version: str = None) -> SchemaDatasetFacet:
     """Fetch schema from AWS Glue Schema Registry."""
-    config = load_config()
-    glue_client = boto3.client('glue', region_name=config['gsr']['region'])
+    glue_client = boto3.client('glue', region_name=os.environ['AWS_REGION'])
 
     try:
         version_number = {'LatestVersion': True} if schema_version is None else {'VersionNumber': schema_version}
@@ -35,7 +29,7 @@ def get_schema_from_glue(schema_name: str, schema_version: str = None) -> Schema
         response = glue_client.get_schema_version(
             SchemaId={
                 'SchemaName': schema_name,
-                'RegistryName': config['gsr']['registry_name']
+                'RegistryName': os.environ['GLUE_REGISTRY_NAME']
             },
             SchemaVersionNumber=version_number
         )
@@ -52,10 +46,8 @@ def get_schema_from_glue(schema_name: str, schema_version: str = None) -> Schema
         return None
 
 def create_schema_registry_client() -> SchemaRegistryClient:
-    """Create AWS Glue Schema Registry client based on config.yaml."""
-    config = load_config()
-    region = config['gsr']['region']
-    registry_name = config['gsr']['registry_name']
+    region = os.environ['AWS_REGION']
+    registry_name = os.environ['GLUE_REGISTRY_NAME']
     glue_client = boto3.client('glue', region_name=region)
     logger.info(f"Starting Glue client")
     return SchemaRegistryClient(glue_client, registry_name=registry_name)

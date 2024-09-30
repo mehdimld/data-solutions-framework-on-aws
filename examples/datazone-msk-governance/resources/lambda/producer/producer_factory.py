@@ -3,10 +3,11 @@ from kafka import KafkaProducer
 from aws_msk_iam_sasl_signer import MSKAuthTokenProvider
 from openlineage.client import OpenLineageClient
 from utils.schema_registry import create_schema_registry_client, create_kafka_serializer, load_avro_schema
-from utils.common import emit_event, create_datasets, get_schema_facet, load_config, create_openlineage_client
+from utils.common import emit_event, create_datasets, get_schema_facet, create_openlineage_client
 import logging
 import uuid
 import time
+import os
 from threading import Thread
 
 logging.basicConfig(level=logging.INFO)
@@ -71,15 +72,14 @@ class OpenLineageKafkaProducer(KafkaProducer):
 
 class ProducerFactory:
     def __init__(self, auth_type: str, job_name: str, outputs: list, schema_file_path: str, location: str = None):
-        config = load_config()
         self.auth_type = auth_type
         self.job_name = job_name
         self.outputs = outputs
         self.schema_file_path = schema_file_path
         self.location = location
-        self.bootstrap_servers = config['kafka']['bootstrap_servers']
-        self.client_id = config['kafka']['client_id']
-        self.region = config['gsr']['region']
+        self.bootstrap_servers = os.environ['KAFKA_BOOTSTRAP']
+        self.client_id = 'lambda-producer'
+        self.region = os.environ['AWS_REGION']
         self.producer = None
 
     def _initialize_iam_producer(self):

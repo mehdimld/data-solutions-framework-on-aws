@@ -1,26 +1,19 @@
-import yaml
 from openlineage.client import OpenLineageClient
 from openlineage.client.run import RunEvent, RunState, Run, Job, Dataset
 from openlineage.client.facet import SchemaDatasetFacet
 from datetime import datetime,timezone
-from custom_transport import DataZoneTransport, DataZoneConfig
+from utils.custom_transport import DataZoneTransport, DataZoneConfig
 
 import json
+import os
 from typing import List
 
-def load_config() -> dict:
-    """Load the configuration from config.yaml."""
-    with open('config.yaml', 'r') as config_file:
-        return yaml.safe_load(config_file)
 
 def create_openlineage_client() -> OpenLineageClient:
     """Create and return an OpenLineage client based on the transport type."""
-    config = load_config()
 
-    if config['openlineage']['transport_type'] == 'datazone':
-        # Fetch the domain_id for DataZone from the config file
-        datazone_config = DataZoneConfig(domain_id=config['openlineage']['domain_id'],region=config['openlineage']['region'])
-        transport = DataZoneTransport(datazone_config)
+    datazone_config = DataZoneConfig(domain_id=os.environ['DZ_DOMAIN_ID'],region=os.environ['AWS_REGION'])
+    transport = DataZoneTransport(datazone_config)
 
     return OpenLineageClient(transport=transport)
 
@@ -34,9 +27,9 @@ def get_schema_facet(schema_file_path: str) -> SchemaDatasetFacet:
 
 def create_datasets(schema_facet: SchemaDatasetFacet, dataset_type: str = "output") -> list:
     """Create datasets for OpenLineage events, categorized by dataset_type ('input' or 'output')."""
-    config = load_config()
-    cluster_name = config['kafka']['cluster_name']
-    topic_name = config['kafka']['topic']
+
+    cluster_name = os.environ['KAFKA_CLUSTER_NAME']
+    topic_name = os.environ['KAFKA_TOPIC']
 
     dataset = {
         'namespace': f"kafka://{cluster_name}",
@@ -48,8 +41,7 @@ def create_datasets(schema_facet: SchemaDatasetFacet, dataset_type: str = "outpu
 
 def emit_event(client: OpenLineageClient, run_id: str, job_name: str, state: str, producer: str, datasets: List[Dataset], dataset_type: str):
     """Emit OpenLineage event with either input or output datasets."""
-    config = load_config()
-    cluster_name = config['kafka']['cluster_name']
+    cluster_name = os.environ['KAFKA_CLUSTER_NAME']
 
     # Create Job and Run objects
     job = Job(namespace=f"{cluster_name}", name=job_name)

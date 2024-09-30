@@ -2,7 +2,7 @@ from consumer_factory import ConsumerFactory
 import logging
 from common import load_config
 
-def main():
+def lambda_handler(event, context):
     logging.basicConfig(level=logging.INFO)
     logger = logging.getLogger(__name__)
 
@@ -26,4 +26,4 @@ def main():
         consumer.close()
 
 if __name__ == "__main__":
-    main()
+    lambda_handler()
