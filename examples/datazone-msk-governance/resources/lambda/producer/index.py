@@ -13,8 +13,8 @@ def lambda_handler(event, context):
     producer_factory = ProducerFactory(auth_type, job_name, outputs, schema_file_path)
     producer = producer_factory.get_producer()
 
-    names = ['Francisco Doe', 'Jane Smith', 'John Doe']
-    favorite_numbers = [6, 7, 42]
+    names = ['Francisco Doe', 'Jane Smith', 'John Doe', 'John Wick']
+    favorite_numbers = [6, 7, 42, 10, 56, 12, 35, 78, 40]
 
     try:
         for name in names:

@@ -1,6 +1,3 @@
-# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
-# SPDX-License-Identifier: Apache-2.0
-
 from aws_cdk import (
     BundlingOptions,
     CfnParameterProps,
@@ -25,10 +22,12 @@ from cdklabs import aws_data_solutions_framework as dsf
 
 class StreamingGovernanceStack(Stack):
 
-    def __init__(self, scope: Construct, construct_id: str, domain_id: str, **kwargs) -> None:
+    def __init__(self, scope: Construct, construct_id: str, domain_id: str, environment_id: str, datazone_portal_role_name: str, **kwargs) -> None:
         super().__init__(scope, construct_id, **kwargs)
 
         stack = Stack.of(self)
+        producer_topic = 'producer-data-product'
+        consumer_topic = 'consumer-data-product'
 
         # Set the flag to remove all resources on delete
         self.node.set_context("@data-solutions-framework-on-aws/removeDataOnDestroy", True)
@@ -64,15 +63,14 @@ class StreamingGovernanceStack(Stack):
                                                   subnets=ec2.SubnetSelection(subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS),
                                                   removal_policy=RemovalPolicy.DESTROY)
         
-        gromav = iam.Role.from_role_name(self, 'gromav', 'gromav')
+        datazone_portal_role = iam.Role.from_role_name(self, 'DataZonePortalRole', datazone_portal_role_name)
         
         ### Producer environment
         
         msk_cluster.add_topic('ProducerTopic',
                               topic_definition=dsf.streaming.MskTopic(
                                   num_partitions=1,
-                                  topic='producer-data-product'))
-        
+                                  topic=producer_topic))
 
         producer_schema_registry = glue.CfnRegistry(self, 'ProducerRegistry', 
                                                     name='producer-registry')
@@ -119,14 +117,14 @@ class StreamingGovernanceStack(Stack):
                                                     'glue:QuerySchemaVersionMetadata',],
                                                 resources=['*'])])})
         
-        msk_cluster.grant_produce('producer-data-product', producer_role)
+        msk_cluster.grant_produce(producer_topic, producer_role)
         
         producer_dz_project = datazone.CfnProject(self, 'ProducerProject', domain_identifier=domain_id, name='producer')
 
         datazone.CfnProjectMembership(self, 'AdminProducerMembership', 
                                       designation='PROJECT_OWNER', 
                                       domain_identifier=domain_id, 
-                                      member=datazone.CfnProjectMembership.MemberProperty(user_identifier=gromav.role_arn),
+                                      member=datazone.CfnProjectMembership.MemberProperty(user_identifier=datazone_portal_role.role_arn),
                                       project_identifier=producer_dz_project.attr_id)
         
         dsf.governance.DataZoneGsrMskDataSource(self, 
@@ -153,7 +151,7 @@ class StreamingGovernanceStack(Stack):
                                                     'KAFKA_CLUSTER_NAME': msk_cluster.cluster_name,
                                                     'KAFKA_AUTH': 'iam',
                                                     'KAFKA_BOOTSTRAP': msk_cluster.cluster_boostrap_brokers,
-                                                    'KAFKA_TOPIC': 'producer-data-product',
+                                                    'KAFKA_TOPIC': producer_topic,
                                                     'GLUE_REGISTRY_NAME': producer_schema_registry.name,
                                                     'DZ_DOMAIN_ID': domain_id,
                                                 })
@@ -167,17 +165,24 @@ class StreamingGovernanceStack(Stack):
         datazone.CfnProjectMembership(self, 'AdminConsumerMembership', 
                                       designation='PROJECT_OWNER', 
                                       domain_identifier=domain_id, 
-                                      member=datazone.CfnProjectMembership.MemberProperty(user_identifier=gromav.role_arn),
+                                      member=datazone.CfnProjectMembership.MemberProperty(user_identifier=datazone_portal_role.role_arn),
                                       project_identifier=consumer_dz_project.attr_id)
                 
         msk_cluster.add_topic('ConsumerTopic',
                               topic_definition=dsf.streaming.MskTopic(
                                   num_partitions=1,
-                                  topic='consumer-data-product'))
+                                  topic=consumer_topic))
         
         consumer_schema_registry = glue.CfnRegistry(self, 'ConsumerRegistry', 
                                                     name='consumer-registry')
         
+        dsf.governance.DataZoneGsrMskDataSource(self, 
+                                                'ConsumerGsrDataSource',
+                                                cluster_name=msk_cluster.cluster_name,
+                                                domain_id=domain_id,
+                                                project_id=consumer_dz_project.attr_id,
+                                                registry_name=consumer_schema_registry.name,
+                                                enable_schema_registry_event=True)
 
         flink_app_asset = assets.Asset(self, 'FlinkAppAsset',
                                        path="resources/flink",  # Path to the Flink application folder
@@ -249,7 +254,7 @@ class StreamingGovernanceStack(Stack):
                                                  ]
                                              )])})
 
-        msk_cluster.grant_produce('consumer-data-product', consumer_role)
+        msk_cluster.grant_produce(consumer_topic, consumer_role)
         
         asset_grant = flink_app_asset.bucket.grant_read(identity=consumer_role, objects_key_pattern=flink_app_asset.s3_object_key)
         
@@ -276,7 +281,7 @@ class StreamingGovernanceStack(Stack):
                                                                     property_group_id="FlinkApplicationProperties",
                                                                     property_map={
                                                                         'bootstrap.servers': msk_cluster.cluster_boostrap_brokers,
-                                                                        'source.topic': 'producer-data-product',
+                                                                        'source.topic': producer_topic,
                                                                         'sourceClusterName': msk_cluster.cluster_name,
                                                                         'datazoneDomainID': domain_id,
                                                                         'lineageTransport': 'datazone',
@@ -294,53 +299,10 @@ class StreamingGovernanceStack(Stack):
                                                                     metrics_level="APPLICATION",
                                                                     log_level="INFO"))))
                 
-        dsf.governance.DataZoneHelpers.create_subscription_target(self, 'ConsumerSubscriptionTarget',
-                                                                  custom_asset_type=msk_asset_type.msk_custom_asset_type,
-                                                                  name='MskTopicsTarget',
-                                                                  provider='dsf',
-                                                                  environment_id='45d4umtivdvz8n',
-                                                                  authorized_principals=[consumer_role],
-                                                                  manage_access_role=gromav)
-
-        emr_consumer_runtime = dsf.processing.SparkEmrServerlessRuntime(self, 
-                                                                        'EmrConsumerRuntime',
-                                                                        name='EmrConsumer',
-                                                                        architecture=dsf.utils.Architecture.ARM64,
-                                                                        auto_stop_configuration=emrserverless.CfnApplication.AutoStopConfigurationProperty(
-                                                                            enabled=True, 
-                                                                            idle_timeout_minutes=1
-                                                                        ),
-                                                                        network_configuration=emrserverless.CfnApplication.NetworkConfigurationProperty(
-                                                                            subnet_ids=vpc.vpc.select_subnets(subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS).subnet_ids,
-                                                                            security_group_ids=[vpc.vpc.vpc_default_security_group]
-                                                                        ),
-                                                                        removal_policy=RemovalPolicy.DESTROY)
-        
-        emr_package = dsf.processing.PySparkApplicationPackage(self, 
-                                                               'EmrConsumerPackage',
-                                                               application_name='EmrConsumer',
-                                                               entrypoint_path='./resources/pyspark/src/main.py',
-                                                               dependencies_folder='./resources/pyspark',
-                                                               venv_archive_path="/venv-package/pyspark-env.tar.gz",
-                                                               removal_policy=RemovalPolicy.DESTROY)
-        
-        spark_params = (
-            f" --conf spark.emr-serverless.driverEnv.KAFKA_SOURCE_BOOTSTRAP"
-            f" --conf spark.emr-serverless.driverEnv.KAFKA_SOURCE_TOPIC"
-            f" --conf spark.emr-serverless.driverEnv.KAFKA_TARGET_BOOTSTRAP"
-            f" --conf spark.emr-serverless.driverEnv.KAFKA_TARGET_TOPIC"
-            f" --packages 'io.openlineage:openlineage-spark_2.12:1.9'"
-            f" --conf spark.extraListeners=io.openlineage.spark.agent.OpenLineageSparkListener"
-            f" --conf spark.openlineage.transport.type=amazon_datazone"
-            f" --conf spark.openlineage.transport.domain_id=${domain_id}"
-        )
-        
-        emr_job = dsf.processing.SparkEmrServerlessJob(self, 
-                                                       'EmrServerlessJob',
-                                                        dsf.processing.SparkEmrServerlessJobProps(
-                                                            name=f"emr-consumer",
-                                                            application_id=emr_consumer_runtime.application.attr_application_id,
-                                                            execution_role=consumer_role,
-                                                            spark_submit_entry_point=emr_package.entrypoint_uri,
-                                                            spark_submit_parameters=emr_package.spark_venv_conf + spark_params,
-                                                            removal_policy=RemovalPolicy.DESTROY))
+        # dsf.governance.DataZoneHelpers.create_subscription_target(self, 'ConsumerSubscriptionTarget',
+        #                                                           custom_asset_type=msk_asset_type.msk_custom_asset_type,
+        #                                                           name='MskTopicsTarget',
+        #                                                           provider='dsf',
+        #                                                           environment_id=environment_id,
+        #                                                           authorized_principals=[consumer_role],
+        #                                                           manage_access_role=datazone_portal_role)
